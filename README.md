@@ -60,7 +60,7 @@ Caution! The free GPU runtimes are very limited! Make sure to disconnect and del
 
 If any of this happens to you, please consult with the professor.
 
-## ECE491B Assignment instructions
+## ECE405 Assignment instructions
 
 Follow along the [CS336@Stanford handout](./cs336_spring2025_assignment1_basics.pdf) with small deviations:
 1. What the code looks like: clone https://github.com/igormolybog/ece405-assignment1-basics.git
@@ -68,10 +68,10 @@ Follow along the [CS336@Stanford handout](./cs336_spring2025_assignment1_basics.
     - Submit the report reflecting your attempts at implementation for partial credit
 3. How to submit: You will submit the report on the assignment to [Assignment Submission Form](https://docs.google.com/forms/d/e/1FAIpQLScJg_QkwjKux3xKeM-EOmZyvA6zlbVIrf_lxN_qoCFoxdqTrg/viewform?usp=sharing&ouid=111841773839267096112). The code does not have to be attached as long as you include links to the main GitHub branch where your code lives and links to all of the Colab notebooks if applicable.
     - You don't need to submit to leaderboard.
-5. Problems (learning_rate, batch_size_experiment, parallel_layers, layer_norm_ablation, pre_norm_ablation, main_experiment):
+4. Problems (learning_rate, batch_size_experiment, parallel_layers, layer_norm_ablation, pre_norm_ablation, main_experiment):
     - get a free T4 GPU at Colab
     - reduce the number of total tokens processed down to 33,000,000 or even lower for faster iteration. Keep the number of tokens consistant across your experiments.
-6. Problem (learning_rate):
+5. Problem (learning_rate):
     - validation loss can be anything
-7. Skip Problem (leaderboard) from Section 7.5
+6. Skip Problem (leaderboard) from Section 7.5
 
