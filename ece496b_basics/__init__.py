@@ -1,104 +1,133 @@
-# ece496b_basics/__init__.py
-
-from typing import List, Dict, Tuple, Iterable  # Typing helpers for annotations
-import os  # PathLike typing support
-import regex as re  # Regex module with Unicode property support
-from collections import defaultdict  # lets increment counts without checking for missing keys
-import multiprocessing  # For parallel pre-tokenization
+from typing import List, Dict, Tuple, Iterable      # Typing helpers for annotations
+import os                                           # PathLike typing support
+import regex as re                                  # Regex module with Unicode property support
+from collections import defaultdict                 # lets increment counts without checking for missing keys
+import multiprocessing                              # For parallel pre-tokenization
 
 # GPT-2 pre-tokenization pattern - splits text into word-like chunks
 GPT2_SPLIT_PATTERN = r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
-def _iter_pretokens(text: str, special_tokens: List[str], pat: re.Pattern) -> Iterable[bytes]:  # Yield pre-tokens from text
-    if special_tokens:  # Split on special tokens first
-        delimiter = "|".join(re.escape(tok) for tok in special_tokens)  # Build escaped split pattern
-        segments = re.split(delimiter, text)  # Split text around special tokens
-    else:  # No special tokens provided
-        segments = [text]  # Use full text as one segment
+# Internal helper to pre-tokenize text into byte chunks, respecting special tokens as boundaries
+# 1. Split on special tokens first, so those markers act as document boundaries and don’t get mixed into surrounding text. 
+# 2. Run GPT‑2 regex pattern over each segment, producing word‑like chunks 
+# 3. Each chunk is encoded to UTF‑8 bytes 
 
-    for segment in segments:  # Process each segment separately
-        if not segment:  # Skip empty segments
-            continue  # Nothing to tokenize
-        for match in pat.finditer(segment):  # Find regex matches
-            token = match.group(0)  # Extract matched substring
-            if token:  # Ensure token is non-empty
-                yield token.encode("utf-8")  # Return UTF-8 bytes
+# It enforces the pre‑tokenization scheme (GPT‑2 style).
+# It cleanly handles special tokens as hard boundaries.
+# It converts to bytes, which is required for byte‑level BPE training.
 
-# Apply a BPE merge to a token sequence, return new sequence and whether it changed
+def _iter_pretokens(text: str, special_tokens: List[str], pat: re.Pattern) -> Iterable[bytes]:
+    if special_tokens:                              # Split on special tokens first
+        delimiter = "|".join(re.escape(tok) for tok in special_tokens) # Build escaped split pattern
+        segments = re.split(delimiter, text)        # Split text around special tokens
+    else:                                           # No special tokens provided
+        segments = [text]                           # Use full text as one segment
+
+    for segment in segments:                        # Process each segment separately
+        if not segment:                             # Skip empty segments
+            continue                                # Nothing to tokenize
+        for match in pat.finditer(segment):         # Find regex matches
+            token = match.group(0)                  # Extract matched substring
+            if token:                               # Ensure token is non-empty
+                yield token.encode("utf-8")         # Return UTF-8 bytes
+
+# Apply a BPE merge to a single token, return new sequence and whether it changed
 def merge_key(ids: Tuple[int, ...], pair: Tuple[int, int], idx: int) -> Tuple[Tuple[int, ...], bool]:
-    new_ids: List[int] = []                      # Output list of token ids after merge
-    i: int = 0                                   # Position pointer over input
-    changed: bool = False                        # Track if any merge happened
-    while i < len(ids):                          # Continue until end of sequence
+    new_ids: List[int] = []                         # Output list of token ids after merge
+    i: int = 0                                      # Position pointer over input
+    changed: bool = False                           # Track if any merge happened
+    while i < len(ids):                             # Continue until end of sequence
         if i < len(ids) - 1 and ids[i] == pair[0] and ids[i + 1] == pair[1]:  # Check if next two tokens match pair
-            new_ids.append(idx)                  # Replace pair with new merged token
-            i += 2                               # Skip both merged tokens
-            changed = True                       # Mark that we made a change
-        else:                                    # No match at this position
-            new_ids.append(ids[i])               # Keep current token as-is
-            i += 1                               # Advance by one
-    return tuple(new_ids), changed               # Return new sequence and change flag
+            new_ids.append(idx)                     # Replace pair with new merged token
+            i += 2                                  # Skip both merged tokens
+            changed = True                          # Mark that we made a change
+        else:                                       # No match at this position
+            new_ids.append(ids[i])                  # Keep current token as-is
+            i += 1                                  # Advance by one
+    return tuple(new_ids), changed                  # Return new sequence and change flag
+
+# Helper for multiprocessing: lets each worker pre-tokenize its own file chunk and return counts.
+def _pretokenize_chunk(args: Tuple) -> Dict[Tuple[int, ...], int]:  
+    """Pre-tokenize a byte range of a file and return token counts."""  
+    input_path, start, end, special_tokens = args   # Unpack file path, byte range, and special tokens
+    pat = re.compile(GPT2_SPLIT_PATTERN)            # Compile GPT-2 regex for pre-tokenization
+    counts: Dict[Tuple[int, ...], int] = {}         # Map from token byte tuples to counts
+    with open(input_path, "rb") as f:               # Open file in binary mode for byte-accurate slicing
+        f.seek(start)                               # Seek to the start byte offset
+        raw = f.read(end - start)                   # Read the specified byte range
+    # Trim trailing incomplete UTF-8 bytes so we don't silently drop characters at chunk edges.
+    # A UTF-8 continuation byte has the form 10xxxxxx (0x80-0xBF). Walk backwards from the end
+    # to find the last leading byte; if it starts a multi-byte sequence that extends past our
+    # slice, strip it (the next chunk will pick it up from its start).
+    if raw:
+        i = len(raw) - 1                            # Start at last byte
+        while i >= 0 and (raw[i] & 0xC0) == 0x80:  # Skip continuation bytes (10xxxxxx)
+            i -= 1
+        if i >= 0:                                  # Found a leading byte
+            lead = raw[i]
+            if lead >= 0xF0:                        # 4-byte sequence start
+                expected = 4
+            elif lead >= 0xE0:                      # 3-byte sequence start
+                expected = 3
+            elif lead >= 0xC0:                      # 2-byte sequence start
+                expected = 2
+            else:                                   # ASCII byte (0xxxxxxx)
+                expected = 1
+            if len(raw) - i < expected:             # Sequence extends past our slice
+                raw = raw[:i]                       # Trim incomplete sequence
+    text = raw.decode("utf-8", errors="ignore")     # Decode bytes to text (now safe at boundaries)
+    for token_bytes in _iter_pretokens(text, special_tokens, pat):  # Iterate GPT-2 pre-tokens
+        key = tuple(token_bytes)                    # Convert token bytes to a hashable tuple of ints
+        counts[key] = counts.get(key, 0) + 1        # Increment count for this token
+    return counts                                   # Return per-chunk token frequency map
 
 
-def _pretokenize_chunk(args: Tuple) -> Dict[Tuple[int, ...], int]:
-    """Pre-tokenize a byte range of a file and return token counts."""
-    input_path, start, end, special_tokens = args
-    pat = re.compile(GPT2_SPLIT_PATTERN)
-    counts: Dict[Tuple[int, ...], int] = {}
-    with open(input_path, "rb") as f:
-        f.seek(start)
-        raw = f.read(end - start)
-    text = raw.decode("utf-8", errors="ignore")
-    for token_bytes in _iter_pretokens(text, special_tokens, pat):
-        key = tuple(token_bytes)
-        counts[key] = counts.get(key, 0) + 1
-    return counts
-
-
+# Helper for multiprocessing: find safe chunk boundaries so workers don't split documents mid-special-token.
 def _find_chunk_boundaries(
-    file_path: str | os.PathLike,
-    desired_num_chunks: int,
-    split_special_token: bytes,
+    file_path: str | os.PathLike,                   # Path to the input text file
+    desired_num_chunks: int,                        # Target number of chunks (usually = num_workers)
+    split_special_token: bytes,                     # Byte sequence to align chunk cuts (e.g., <|endoftext|>)
 ) -> List[int]:
-    """Split file into chunks on special token boundaries."""
-    with open(file_path, "rb") as f:
-        f.seek(0, os.SEEK_END)
-        file_size = f.tell()
-        f.seek(0)
+    """Split file into chunks on special token boundaries."""  # Keep chunks aligned to document separators
+    with open(file_path, "rb") as f:                # Open file in binary mode for byte-accurate offsets
+        f.seek(0, os.SEEK_END)                      # Seek to end to measure file size
+        file_size = f.tell()                        # Total file size in bytes
+        f.seek(0)                                   # Reset to start of file
 
-        chunk_size = file_size // desired_num_chunks
-        boundaries = [i * chunk_size for i in range(desired_num_chunks + 1)]
-        boundaries[-1] = file_size
+        chunk_size = file_size // desired_num_chunks  # Initial equal-sized chunk guess
+        boundaries = [i * chunk_size for i in range(desired_num_chunks + 1)]  # Byte offsets for chunks
+        boundaries[-1] = file_size                  # Ensure final boundary is end of file
 
-        mini_chunk_size = 4096
-        for bi in range(1, len(boundaries) - 1):
-            initial_position = boundaries[bi]
-            f.seek(initial_position)
-            while True:
-                mini_chunk = f.read(mini_chunk_size)
-                if mini_chunk == b"":
-                    boundaries[bi] = file_size
-                    break
-                found_at = mini_chunk.find(split_special_token)
-                if found_at != -1:
-                    boundaries[bi] = initial_position + found_at
-                    break
-                initial_position += mini_chunk_size
+        mini_chunk_size = 4096                      # Read in small blocks to search for token boundary
+        overlap = len(split_special_token) - 1      # Overlap between windows to catch tokens spanning reads
+        for bi in range(1, len(boundaries) - 1):    # Skip first and last boundaries
+            initial_position = boundaries[bi]       # Proposed boundary position
+            f.seek(initial_position)                # Seek to proposed boundary
+            while True:                             # Scan forward until we find the split token
+                mini_chunk = f.read(mini_chunk_size) # Read a small window of bytes
+                if mini_chunk == b"":               # Reached EOF without finding token
+                    boundaries[bi] = file_size      # Clamp boundary to EOF
+                    break                           # Stop scanning this boundary
+                found_at = mini_chunk.find(split_special_token)  # Look for the split token
+                if found_at != -1:                  # Found a split token in this window
+                    boundaries[bi] = initial_position + found_at  # Move boundary to token start
+                    break                           # Stop scanning this boundary
+                initial_position += mini_chunk_size - overlap  # Advance with overlap to catch spanning tokens
 
-    return sorted(set(boundaries))
+    return sorted(set(boundaries))                  # Return unique, sorted boundary offsets
 
 
 # Train a byte-level BPE tokenizer from a text file
 def train_bpe(
-    input_path: str | os.PathLike,               # Path to training text file
-    vocab_size: int,                             # Maximum final vocabulary size (bytes + merges + specials)
-    special_tokens: List[str],                   # Special tokens to append to the vocabulary
+    input_path: str | os.PathLike,                  # Path to training text file
+    vocab_size: int,                                # Maximum final vocabulary size (bytes + merges + specials)
+    special_tokens: List[str],                      # Special tokens to append to the vocabulary
 ) -> Tuple[Dict[int, bytes], List[Tuple[bytes, bytes]]]:  # Return vocab and merges
 
     assert vocab_size > 0, "vocab_size must be positive"  # Validate vocab_size is positive
 
-    num_special: int = len(special_tokens)       # Count how many special tokens will be added
-    num_merges: int = vocab_size - 256 - num_special  # Number of merges allowed after reserving space
+    num_special: int = len(special_tokens)          # Count how many special tokens will be added
+    num_merges: int = vocab_size - 256 - num_special # Number of merges allowed after reserving space
     assert num_merges >= 0, f"vocab_size={vocab_size} is too small for 256 byte tokens + {num_special} special tokens"
 
     # --- Phase 1: Pre-tokenize with multiprocessing ---
