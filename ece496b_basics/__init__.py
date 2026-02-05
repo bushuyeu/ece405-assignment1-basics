@@ -29,26 +29,6 @@ def _iter_pretokens(text: str, special_tokens: List[str], pat: re.Pattern) -> It
             if token:
                 yield token.encode("utf-8")            # yield as raw bytes
 
-
-def merge_key(ids: Tuple[int, ...], pair: Tuple[int, int], idx: int) -> Tuple[Tuple[int, ...], bool]:
-    """Apply a single BPE merge to a token sequence (left-to-right, greedy).
-
-    Used by tests via adapters.py. Not called in the optimized training loop.
-    """
-    new_ids: List[int] = []
-    i = 0
-    changed = False
-    while i < len(ids):
-        if i < len(ids) - 1 and ids[i] == pair[0] and ids[i + 1] == pair[1]:
-            new_ids.append(idx)                        # replace pair with merged token
-            i += 2                                     # skip both consumed tokens
-            changed = True
-        else:
-            new_ids.append(ids[i])
-            i += 1
-    return tuple(new_ids), changed
-
-
 def _trim_incomplete_utf8(raw: bytes) -> bytes:
     """Trim a trailing incomplete UTF-8 multi-byte sequence.
 
