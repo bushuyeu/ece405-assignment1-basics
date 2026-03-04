@@ -167,6 +167,8 @@ def main():
     parser.add_argument("--no_quality", action="store_true", help="Skip quality classifier")
     parser.add_argument("--glob", default="*.warc.wet.gz", help="Glob pattern for WET files")
     parser.add_argument("--models_dir", default=None, help="Directory containing model files (lid.176.bin, dolma models, quality_classifier.bin)")
+    parser.add_argument("--start", type=int, default=0, help="Start index (0-based) into sorted file list")
+    parser.add_argument("--count", type=int, default=None, help="Number of files to process (default: all remaining)")
     args = parser.parse_args()
 
     input_dir = pathlib.Path(args.input_dir)
@@ -190,6 +192,13 @@ def main():
         set_quality_model_path(str(quality_path))
 
     wet_files = sorted(input_dir.glob(args.glob))
+
+    # Slice file list for parallel chunk processing
+    if args.start > 0 or args.count is not None:
+        end = args.start + args.count if args.count else len(wet_files)
+        wet_files = wet_files[args.start:end]
+        print(f"Processing chunk: files [{args.start}:{end}] ({len(wet_files)} files)")
+
     if not wet_files:
         print(f"No WET files found matching {args.glob} in {input_dir}")
         sys.exit(1)
