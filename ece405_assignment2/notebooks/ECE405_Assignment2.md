@@ -234,9 +234,9 @@ Language filtering dominates — 78.6% of records are non-English. Gopher rules 
 | Assignment | 5,000 | ~136 hours | ~8.5 hours | ~2.1 hours |
 | Full CC dump | 100,000 | ~2,718 hours | ~170 hours | ~42 hours |
 
-**Actual Koa cluster runtime**: All 5,000 WET files were processed on the Koa HPC cluster using 15 Slurm jobs (chunks of 350 files each, last chunk 100 files). Each job used 3 CPUs and 20 GB RAM on the sandbox partition (max 2 concurrent jobs allowed). Individual job runtimes were ~2h 18m per chunk of 350 files (~24s/file with 3 parallel workers). Total compute time across all jobs: ~33 CPU-hours. Wall-clock time: ~17 hours (constrained by the sandbox queue's 2-job concurrency limit). Output: 5,001 filtered text files totaling 13 GB.
+**Actual Koa cluster runtime**: All 5,000 WET files were processed on the Koa HPC cluster using 15 Slurm jobs (chunks of 350 files each, last chunk 100 files). Each job used 3 CPUs and 20 GB RAM on the sandbox partition (max 2 concurrent jobs allowed). Individual job runtimes: median 2h 21m per 350-file chunk (range 2h 17m–3h 15m), last 100-file chunk in 41m 49s. Per-file rate: ~24s with 3 parallel workers (~72s single-core). Total elapsed time across all jobs: 33.8 hours. Total CPU-hours: ~101 (33.8h × 3 CPUs). Wall-clock time: 18h 18m (first job start to last job end, constrained by the sandbox queue's 2-job concurrency limit). Output: 5,001 filtered text files totaling 13 GB.
 
-For the full CC dump (100,000 WET files), extrapolating from Koa: ~660 CPU-hours total compute, or ~5.5 hours with 120 parallel workers (realistic on a large cluster).
+For the full CC dump (100,000 WET files), extrapolating from Koa at ~72s/file single-core: ~2,000 CPU-hours total compute, or ~17 hours wall time with 120 parallel workers.
 
 ### inspect_filtered_data
 
@@ -296,11 +296,11 @@ Slurm job: `scripts/tokenize_job.slurm` (ece405 partition, 16 CPUs, 32 GB RAM).
 
 | Metric | Value |
 |--------|-------|
-| Input files | 5,000 filtered text files (13 GB) |
+| Input files | 5,001 filtered text files (13 GB) |
 | Documents tokenized | 5,750,675 |
 | Total tokens | 8,733,540,502 (~8.7B) |
 | Output file | `train.bin` (17 GB, uint16 numpy) |
-| Processing time | 24.6 minutes (16 workers) |
+| Processing time | 24 min 55 sec (16 CPUs, Slurm job 11186980) |
 
 The validation split (`valid.bin`) was created by carving the last 10M tokens from `train.bin` using `scripts/split_validation.py`. This is negligible relative to the 8.7B token training set (~0.1% overlap).
 
@@ -326,7 +326,7 @@ Slurm job: `scripts/train_job.slurm`
 | Training steps | 12,000 |
 | Eval interval | Every 1,000 steps |
 | Total tokens seen | ~1.57B (18% of 8.7B dataset) |
-| Training time | ~14 hours |
+| Training time | 13h 56m (Slurm job 11294442) |
 | wandb | offline mode, synced post-hoc |
 
 **Hardware adaptation note**: The default training configuration (batch_size=128, torch.compile=True, 200K steps) was designed for the Together cluster's A100 GPUs (40–80 GB VRAM). On Koa's RTX A4000 GPUs (16 GB), we reduced batch size from 128 to 16 and disabled torch.compile to fit in VRAM, compensating with gradient accumulation (8 steps) to preserve the same effective batch size of 256 sequences per step. Training steps were reduced from 200K to 12,000 to fit within the 20-hour Slurm wall time limit.
@@ -354,10 +354,12 @@ Validation was measured on a 10M-token held-out split from our own filtered corp
 | 9,000 | 2.982 | 10h 25m |
 | 10,000 | 2.927 | 11h 33m |
 | 11,000 | 2.883 | 12h 42m |
-| **12,000** | **2.856** | **13h 55m** |
+| **12,000** | **2.856** | **13h 56m** |
 
 **Best validation loss: 2.856** at step 12,000 (final step).
 
 The loss decreased consistently throughout training with no signs of plateauing, suggesting further training would improve results. At the current rate of improvement (~0.03 per 1,000 steps), completing the full 200K steps could potentially reduce the loss to ~2.3–2.5, though diminishing returns are expected.
 
 wandb run: https://wandb.ai/pavelbushuyeu-university-of-hawaii-system/ece405-data/runs/6n6ms27f
+
+Model weights: https://huggingface.co/bushuyeu/gpt2-small-cc-filtered
