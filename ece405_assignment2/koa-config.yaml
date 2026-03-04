@@ -1,0 +1,21 @@
+project: ece405_assignment2
+
+default_backend: koa
+
+cuda_minor_version: 12.9
+
+env_watch:
+  - scripts/setup_env.sh
+  - requirements.txt
+  - requirements.lock
+  - requirements-dev.txt
+  - pyproject.toml
+  - poetry.lock
+  - uv.lock
+  - environment.yml
+
+snapshot_excludes:
+  - ./data
+  - .pytest_cache
+  - __pycache__
+  - "*.egg-info"
