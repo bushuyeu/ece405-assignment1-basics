@@ -5,8 +5,13 @@ import fasttext
 
 _model = None
 
+_ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
+
 # Default path; override with set_lid_model_path() or LID_MODEL_PATH env var
-_model_path = os.environ.get("LID_MODEL_PATH", "lid.176.bin")
+_model_path = os.environ.get(
+    "LID_MODEL_PATH",
+    os.path.join(_ASSETS_DIR, "lid.176.bin"),
+)
 
 
 def set_lid_model_path(path: str):

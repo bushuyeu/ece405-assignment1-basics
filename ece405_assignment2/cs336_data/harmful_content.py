@@ -73,11 +73,10 @@ def classify_toxic_speech(text: str) -> tuple[str, float]:
     labels = predictions[0]
     scores = predictions[1]
 
-    # Dolma labels: __label__hatespeech, __label__non-hatespeech
-    # Map to toxic/non-toxic for test compatibility
+    # Model labels: __label__toxic, __label__non-toxic
     toxic_score = 0.0
     for label, score in zip(labels, scores):
-        if label == "__label__hatespeech":
+        if label == "__label__toxic":
             toxic_score = float(score)
             break
 
