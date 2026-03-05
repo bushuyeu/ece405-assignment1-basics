@@ -1,0 +1,23 @@
+# @package _global_
+# Optimized for 8x A100 80GB on Lambda Cloud
+# Effective batch: 128 * 8 GPUs = 1024 sequences/step
+# Tokens/step: 1024 * 512 = 524,288
+# 20,000 steps = ~10.5B tokens (~1.2 epochs of 8.7B dataset)
+# Estimated time: ~2-3 hours
+
+paths:
+  train_bin: /home/ubuntu/data/train.bin
+  valid_bin: /home/ubuntu/data/valid.bin
+  model_output: /home/ubuntu/output/8xa100
+
+training:
+  wandb_entity: pavelbushuyeu-university-of-hawaii-system
+  wandb_project: ece405-data
+  train_batch_size: 128
+  gradient_accumulation_steps: 1
+  compile: true
+  train_steps: 20000
+  eval_interval: 1000
+  eval_iterations: 500
+  save_checkpoints: true
+  log_interval: 10
